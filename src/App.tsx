@@ -30,11 +30,38 @@ const ITEMS_TO_COMPARE = [
   { key: 'Kira Ücreti', alias: 'TC_Kira', label: 'Ev Kirası', unit: 'Ay' },
 ];
 
+const parseDDMMYYYY = (str: string) => {
+  if (!str) return null;
+  const parts = str.split('/');
+  if (parts.length === 3) {
+    const month = parseInt(parts[1], 10);
+    const year = parseInt(parts[2], 10);
+    return year * 12 + (month - 1);
+  }
+  return null;
+};
+
+const parseMMMYY = (str: string) => {
+  if (!str) return null;
+  const parts = str.split('-');
+  if (parts.length === 2) {
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const monthIdx = months.indexOf(parts[0]);
+    const year = parseInt(parts[1], 10);
+    if (year !== -1 && monthIdx !== -1) {
+      const fullYear = year < 50 ? 2000 + year : 1900 + year;
+      return fullYear * 12 + monthIdx;
+    }
+  }
+  return null;
+};
+
 export default function App() {
   const [data, setData] = useState<any[]>([]);
   const [minWageData, setMinWageData] = useState<any[]>([]);
   const [period1, setPeriod1] = useState<string>('');
   const [period2, setPeriod2] = useState<string>('');
+  const [chartDisplayMode, setChartDisplayMode] = useState<'absolute' | 'percentage'>('absolute');
 
   useEffect(() => {
     // Load CPI Basket Data
@@ -78,14 +105,17 @@ export default function App() {
               const processed = trimmed.map(d => {
                 const rawWageStr = String(d['Min Wage'] !== undefined && d['Min Wage'] !== null ? d['Min Wage'] : '').trim().replace(/,/g, '');
                 const rawUSDTLStr = String(d.USDTL !== undefined && d.USDTL !== null ? d.USDTL : '').trim().replace(/,/g, '');
+                const rawTURCPIStr = String(d.TUR_CPI !== undefined && d.TUR_CPI !== null ? d.TUR_CPI : '').trim().replace(/,/g, '');
                 
                 const wageNum = parseFloat(rawWageStr);
                 const usdtlNum = parseFloat(rawUSDTLStr);
+                const turCpiNum = parseFloat(rawTURCPIStr);
                 
                 return {
                   ...d,
                   'Min Wage': !isNaN(wageNum) ? wageNum / 1000000 : 0,
-                  USDTL: !isNaN(usdtlNum) ? usdtlNum / 1000000 : 0
+                  USDTL: !isNaN(usdtlNum) ? usdtlNum / 1000000 : 0,
+                  TUR_CPI: !isNaN(turCpiNum) ? turCpiNum : null
                 };
               });
               setMinWageData(processed);
@@ -124,6 +154,18 @@ export default function App() {
 
   const getRecord = (date: string) => data.find((d) => d.Tarih === date);
 
+  const formatPeriodLabel = (dateStr: string) => {
+    if (!dateStr) return '';
+    const parts = dateStr.split('/');
+    if (parts.length === 3) {
+      const monthIdx = parseInt(parts[1], 10) - 1;
+      const year = parts[2];
+      const monthsTr = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+      return `${monthsTr[monthIdx]} ${year}`;
+    }
+    return dateStr;
+  };
+
   const record1 = getRecord(period1);
   const record2 = getRecord(period2);
 
@@ -153,6 +195,21 @@ export default function App() {
     return 0;
   };
 
+  const getRecordCPI = (record: any) => {
+    if (minWageData && minWageData.length > 0 && record?.Tarih) {
+      const parts = record.Tarih.split('/');
+      if (parts.length === 3) {
+        const monthIdx = parseInt(parts[1], 10) - 1;
+        const year = parts[2].substring(2);
+        const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        const target = `${months[monthIdx]}-${year}`;
+        const match = minWageData.find(m => m.Date === target);
+        if (match && match.TUR_CPI) return match.TUR_CPI;
+      }
+    }
+    return null;
+  };
+
   const getOverallVerdict = () => {
     if (!record1 || !record2) return null;
     let totalChange = 0;
@@ -174,9 +231,21 @@ export default function App() {
 
     if (count === 0) return null;
     const avgChange = totalChange / count;
+
+    let realWageChange: number | null = null;
+    const asgari1 = getAsgariUcret(record1);
+    const asgari2 = getAsgariUcret(record2);
+    const cpi1 = getRecordCPI(record1);
+    const cpi2 = getRecordCPI(record2);
+    if (asgari1 > 0 && asgari2 > 0 && cpi1 && cpi2) {
+      const real1 = asgari1 / cpi1;
+      const real2 = asgari2 / cpi2;
+      realWageChange = parseFloat((((real2 - real1) / real1) * 100).toFixed(1));
+    }
     
     return {
       avgChange: parseFloat(avgChange.toFixed(1)),
+      realWageChange,
       verdictText: avgChange >= 0 
         ? "Mevcut asgari ücretin genel alım gücü önceki döneme göre daha yüksektir." 
         : "Mevcut asgari ücretin genel alım gücü önceki döneme göre azalmıştır."
@@ -216,12 +285,65 @@ export default function App() {
   }, [record1, record2]);
 
   const minWageChartData = useMemo(() => {
-    return minWageData.map(d => ({
-      name: d.Date,
-      'Asgari Ücret (₺)': d['Min Wage'],
-      'Asgari Ücret ($)': d.USDTL && d.USDTL > 0 ? parseFloat((d['Min Wage'] / d.USDTL).toFixed(2)) : null
-    })).filter(d => Boolean(d['Asgari Ücret (₺)']));
-  }, [minWageData]);
+    if (minWageData.length === 0) return [];
+    
+    // Convert period1 and period2 to comparable month indices
+    const p1Val = parseDDMMYYYY(period1);
+    const p2Val = parseDDMMYYYY(period2);
+
+    let filteredData = minWageData;
+    if (p1Val !== null && p2Val !== null) {
+      const minVal = Math.min(p1Val, p2Val);
+      const maxVal = Math.max(p1Val, p2Val);
+      filteredData = minWageData.filter(d => {
+        const itemVal = parseMMMYY(d.Date);
+        return itemVal !== null && itemVal >= minVal && itemVal <= maxVal;
+      });
+    }
+
+    // Find TUR_CPI for Jan-15 (or fallback to the first record if Jan-15 is missing)
+    const jan15Record = minWageData.find(d => d.Date === 'Jan-15') || minWageData[0];
+    const baseTUR_CPI = jan15Record ? jan15Record.TUR_CPI : 20884304.38;
+
+    // Use the first record of the selected period as baseline for Percentage Change mode
+    const firstRecord = filteredData[0] || jan15Record;
+    const initialNominal = firstRecord ? firstRecord['Min Wage'] : null;
+    const initialUSD = firstRecord && firstRecord.USDTL && firstRecord.USDTL > 0 ? (firstRecord['Min Wage'] / firstRecord.USDTL) : null;
+    const initialReal = firstRecord && firstRecord.TUR_CPI && baseTUR_CPI ? (firstRecord['Min Wage'] * (baseTUR_CPI / firstRecord.TUR_CPI)) : null;
+
+    return filteredData.map(d => {
+      const nominal = d['Min Wage'];
+      const cpi = d.TUR_CPI;
+      const realWage = nominal && cpi && baseTUR_CPI ? (nominal * (baseTUR_CPI / cpi)) : null;
+      const usd = d.USDTL && d.USDTL > 0 ? (nominal / d.USDTL) : null;
+
+      if (chartDisplayMode === 'percentage') {
+        const nominalPct = initialNominal && initialNominal > 0 && nominal ? parseFloat((((nominal - initialNominal) / initialNominal) * 100).toFixed(1)) : 0;
+        const usdPct = initialUSD && initialUSD > 0 && usd ? parseFloat((((usd - initialUSD) / initialUSD) * 100).toFixed(1)) : null;
+        const realPct = initialReal && initialReal > 0 && realWage ? parseFloat((((realWage - initialReal) / initialReal) * 100).toFixed(1)) : null;
+
+        return {
+          name: d.Date,
+          'Asgari Ücret (₺) Değişimi %': nominalPct,
+          'Asgari Ücret ($) Değişimi %': usdPct,
+          'Reel Asgari Ücret Değişimi %': realPct
+        };
+      } else {
+        return {
+          name: d.Date,
+          'Asgari Ücret (₺)': nominal,
+          'Asgari Ücret ($)': usd ? parseFloat(usd.toFixed(2)) : null,
+          'Reel Asgari Ücret (Ocak 2015 ₺)': realWage ? parseFloat(realWage.toFixed(2)) : null
+        };
+      }
+    }).filter(d => {
+      if (chartDisplayMode === 'percentage') {
+        return d['Asgari Ücret (₺) Değişimi %'] !== undefined;
+      } else {
+        return Boolean(d['Asgari Ücret (₺)']);
+      }
+    });
+  }, [minWageData, chartDisplayMode, period1, period2]);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans p-8">
@@ -298,9 +420,37 @@ export default function App() {
           <>
             {minWageChartData.length > 0 && (
               <div className="bg-white p-6 rounded-2xl shadow-sm border space-y-4 mb-8">
-                <div className="flex items-center gap-2 mb-2">
-                  <TrendingUp className="w-5 h-5 text-indigo-600" />
-                  <h2 className="text-lg font-bold text-slate-800">Asgari Ücretin Yıllara Göre Değişimi (2015 - 2025)</h2>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-2">
+                  <div className="flex items-center gap-2">
+                    <TrendingUp className="w-5 h-5 text-indigo-600" />
+                    <h2 className="text-lg font-bold text-slate-800">
+                      Asgari Ücretin Değişimi ({formatPeriodLabel(period1)} - {formatPeriodLabel(period2)})
+                    </h2>
+                  </div>
+                  <div className="flex bg-slate-100 p-1 rounded-lg self-start sm:self-auto">
+                    <button
+                      onClick={() => setChartDisplayMode('absolute')}
+                      className={cn(
+                        "px-3 py-1.5 text-xs font-semibold rounded-md transition-all",
+                        chartDisplayMode === 'absolute' 
+                          ? "bg-white text-slate-900 shadow-sm font-bold" 
+                          : "text-slate-500 hover:text-slate-800"
+                      )}
+                    >
+                      Absolüt Değerler
+                    </button>
+                    <button
+                      onClick={() => setChartDisplayMode('percentage')}
+                      className={cn(
+                        "px-3 py-1.5 text-xs font-semibold rounded-md transition-all",
+                        chartDisplayMode === 'percentage' 
+                          ? "bg-white text-slate-900 shadow-sm font-bold" 
+                          : "text-slate-500 hover:text-slate-800"
+                      )}
+                    >
+                      Yüzde Değişim (%)
+                    </button>
+                  </div>
                 </div>
                 <div className="h-72 w-full">
                   <ResponsiveContainer width="100%" height="100%">
@@ -318,22 +468,55 @@ export default function App() {
                         axisLine={false}
                         tickLine={false}
                         tick={{ fill: '#64748b', fontSize: 12 }}
-                        tickFormatter={(val) => `₺${val}`}
+                        tickFormatter={(val) => chartDisplayMode === 'percentage' ? `%${val}` : `₺${val}`}
                       />
-                      <YAxis 
-                        yAxisId="right"
-                        orientation="right"
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fill: '#64748b', fontSize: 12 }}
-                        tickFormatter={(val) => `$${val}`}
-                      />
+                      {chartDisplayMode === 'absolute' && (
+                        <YAxis 
+                          yAxisId="right"
+                          orientation="right"
+                          axisLine={false}
+                          tickLine={false}
+                          tick={{ fill: '#64748b', fontSize: 12 }}
+                          tickFormatter={(val) => `$${val}`}
+                        />
+                      )}
                       <Tooltip 
                         contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                        formatter={(value: any, name: string) => {
+                          if (chartDisplayMode === 'percentage') {
+                            return [`%${value >= 0 ? '+' : ''}${value}`, name];
+                          }
+                          if (name.includes('$')) {
+                            return [`$${value}`, name];
+                          }
+                          return [`₺${value}`, name];
+                        }}
                       />
                       <Legend />
-                      <Line yAxisId="left" type="monotone" dataKey="Asgari Ücret (₺)" stroke="#4f46e5" strokeWidth={3} dot={false} />
-                      <Line yAxisId="right" type="monotone" dataKey="Asgari Ücret ($)" stroke="#10b981" strokeWidth={3} dot={false} />
+                      <Line 
+                        yAxisId="left" 
+                        type="monotone" 
+                        dataKey={chartDisplayMode === 'percentage' ? "Asgari Ücret (₺) Değişimi %" : "Asgari Ücret (₺)"} 
+                        stroke="#4f46e5" 
+                        strokeWidth={3} 
+                        dot={false} 
+                      />
+                      <Line 
+                        yAxisId="left" 
+                        type="monotone" 
+                        dataKey={chartDisplayMode === 'percentage' ? "Reel Asgari Ücret Değişimi %" : "Reel Asgari Ücret (Ocak 2015 ₺)"} 
+                        stroke="#f59e0b" 
+                        strokeWidth={3} 
+                        dot={false} 
+                      />
+                      <Line 
+                        yAxisId={chartDisplayMode === 'percentage' ? "left" : "right"} 
+                        type="monotone" 
+                        dataKey={chartDisplayMode === 'percentage' ? "Asgari Ücret ($) Değişimi %" : "Asgari Ücret ($)"} 
+                        stroke="#10b981" 
+                        strokeWidth={3} 
+                        dot={false} 
+                      />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -457,15 +640,27 @@ export default function App() {
 
       {verdict && (
         <footer className="mt-8 p-6 bg-slate-900 text-white flex flex-col md:flex-row items-center justify-between gap-6 overflow-hidden">
-          <div>
+          <div className="flex-1">
             <h3 className="text-sm uppercase tracking-widest font-bold text-slate-400">Ekonomik Nabız Sonucu</h3>
             <p className="text-2xl font-light italic font-serif mt-1">{verdict.verdictText}</p>
           </div>
-          <div className="text-right border-l border-slate-700 pl-8 w-full md:w-auto">
-            <p className="text-[10px] uppercase font-bold text-slate-500 mb-1">Ortalama Değişim</p>
-            <div className={cn("text-4xl font-black", verdict.avgChange >= 0 ? "text-emerald-400" : "text-rose-400")}>
-              {verdict.avgChange > 0 ? '+' : ''}{verdict.avgChange}%
+          
+          <div className="flex flex-col sm:flex-row gap-6 w-full md:w-auto md:border-l md:border-slate-700 md:pl-8">
+            <div className="text-left sm:text-right">
+              <p className="text-[10px] uppercase font-bold text-slate-500 mb-1">Gıda/Hizmet Sepeti Alım Gücü Değişimi</p>
+              <div className={cn("text-4xl font-black", verdict.avgChange >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                {verdict.avgChange > 0 ? '+' : ''}{verdict.avgChange}%
+              </div>
             </div>
+            
+            {verdict.realWageChange !== null && (
+              <div className="text-left sm:text-right border-t sm:border-t-0 sm:border-l border-slate-700 pt-4 sm:pt-0 sm:pl-6">
+                <p className="text-[10px] uppercase font-bold text-slate-500 mb-1">Reel Asgari Ücret Değişimi (Enflasyondan Arındırılmış)</p>
+                <div className={cn("text-4xl font-black", verdict.realWageChange >= 0 ? "text-amber-400" : "text-rose-400")}>
+                  {verdict.realWageChange > 0 ? '+' : ''}{verdict.realWageChange}%
+                </div>
+              </div>
+            )}
           </div>
         </footer>
       )}
