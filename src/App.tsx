@@ -75,11 +75,19 @@ export default function App() {
               const dataAny = results.data as any[];
               const startIndex = dataAny.findIndex((d) => d.Date === 'Jan-15');
               const trimmed = startIndex !== -1 ? dataAny.slice(startIndex) : dataAny;
-              const processed = trimmed.map(d => ({
-                ...d,
-                'Min Wage': typeof d['Min Wage'] === 'number' ? d['Min Wage'] / 1000000 : d['Min Wage'],
-                USDTL: typeof d.USDTL === 'number' ? d.USDTL / 1000000 : d.USDTL
-              }));
+              const processed = trimmed.map(d => {
+                const rawWageStr = String(d['Min Wage'] !== undefined && d['Min Wage'] !== null ? d['Min Wage'] : '').trim().replace(/,/g, '');
+                const rawUSDTLStr = String(d.USDTL !== undefined && d.USDTL !== null ? d.USDTL : '').trim().replace(/,/g, '');
+                
+                const wageNum = parseFloat(rawWageStr);
+                const usdtlNum = parseFloat(rawUSDTLStr);
+                
+                return {
+                  ...d,
+                  'Min Wage': !isNaN(wageNum) ? wageNum / 1000000 : 0,
+                  USDTL: !isNaN(usdtlNum) ? usdtlNum / 1000000 : 0
+                };
+              });
               setMinWageData(processed);
             }
           }
@@ -211,7 +219,7 @@ export default function App() {
     return minWageData.map(d => ({
       name: d.Date,
       'Asgari Ücret (₺)': d['Min Wage'],
-      'Asgari Ücret ($)': d.USDTL ? parseFloat((d['Min Wage'] / d.USDTL).toFixed(2)) : null
+      'Asgari Ücret ($)': d.USDTL && d.USDTL > 0 ? parseFloat((d['Min Wage'] / d.USDTL).toFixed(2)) : null
     })).filter(d => Boolean(d['Asgari Ücret (₺)']));
   }, [minWageData]);
 
