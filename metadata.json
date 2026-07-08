@@ -1,0 +1,6 @@
+{
+  "name": "Alım Gücü Kıyasla",
+  "description": "Asgari ücret ile temel gıda ve hizmetlerin farklı dönemlerdeki alım gücünü kıyaslamaya yarayan etkileşimli bir araç.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
