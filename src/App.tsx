@@ -106,16 +106,19 @@ export default function App() {
                 const rawWageStr = String(d['Min Wage'] !== undefined && d['Min Wage'] !== null ? d['Min Wage'] : '').trim().replace(/,/g, '');
                 const rawUSDTLStr = String(d.USDTL !== undefined && d.USDTL !== null ? d.USDTL : '').trim().replace(/,/g, '');
                 const rawTURCPIStr = String(d.TUR_CPI !== undefined && d.TUR_CPI !== null ? d.TUR_CPI : '').trim().replace(/,/g, '');
+                const rawReelWageStr = String(d.Reel_wage !== undefined && d.Reel_wage !== null ? d.Reel_wage : '').trim().replace(/,/g, '');
                 
                 const wageNum = parseFloat(rawWageStr);
                 const usdtlNum = parseFloat(rawUSDTLStr);
                 const turCpiNum = parseFloat(rawTURCPIStr);
+                const reelWageNum = parseFloat(rawReelWageStr);
                 
                 return {
                   ...d,
                   'Min Wage': !isNaN(wageNum) ? wageNum / 1000000 : 0,
                   USDTL: !isNaN(usdtlNum) ? usdtlNum / 1000000 : 0,
-                  TUR_CPI: !isNaN(turCpiNum) ? turCpiNum : null
+                  TUR_CPI: !isNaN(turCpiNum) ? turCpiNum : null,
+                  Reel_wage: !isNaN(reelWageNum) ? reelWageNum : null
                 };
               });
               setMinWageData(processed);
@@ -195,7 +198,7 @@ export default function App() {
     return 0;
   };
 
-  const getRecordCPI = (record: any) => {
+  const getRecordReelWage = (record: any) => {
     if (minWageData && minWageData.length > 0 && record?.Tarih) {
       const parts = record.Tarih.split('/');
       if (parts.length === 3) {
@@ -204,7 +207,7 @@ export default function App() {
         const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
         const target = `${months[monthIdx]}-${year}`;
         const match = minWageData.find(m => m.Date === target);
-        if (match && match.TUR_CPI) return match.TUR_CPI;
+        if (match && match.Reel_wage) return match.Reel_wage;
       }
     }
     return null;
@@ -233,13 +236,9 @@ export default function App() {
     const avgChange = totalChange / count;
 
     let realWageChange: number | null = null;
-    const asgari1 = getAsgariUcret(record1);
-    const asgari2 = getAsgariUcret(record2);
-    const cpi1 = getRecordCPI(record1);
-    const cpi2 = getRecordCPI(record2);
-    if (asgari1 > 0 && asgari2 > 0 && cpi1 && cpi2) {
-      const real1 = asgari1 / cpi1;
-      const real2 = asgari2 / cpi2;
+    const real1 = getRecordReelWage(record1);
+    const real2 = getRecordReelWage(record2);
+    if (real1 && real2) {
       realWageChange = parseFloat((((real2 - real1) / real1) * 100).toFixed(1));
     }
     
@@ -301,20 +300,18 @@ export default function App() {
       });
     }
 
-    // Find TUR_CPI for Jan-15 (or fallback to the first record if Jan-15 is missing)
+    // Find Jan-15 record for fallback baseline if needed
     const jan15Record = minWageData.find(d => d.Date === 'Jan-15') || minWageData[0];
-    const baseTUR_CPI = jan15Record ? jan15Record.TUR_CPI : 20884304.38;
 
     // Use the first record of the selected period as baseline for Percentage Change mode
     const firstRecord = filteredData[0] || jan15Record;
     const initialNominal = firstRecord ? firstRecord['Min Wage'] : null;
     const initialUSD = firstRecord && firstRecord.USDTL && firstRecord.USDTL > 0 ? (firstRecord['Min Wage'] / firstRecord.USDTL) : null;
-    const initialReal = firstRecord && firstRecord.TUR_CPI && baseTUR_CPI ? (firstRecord['Min Wage'] * (baseTUR_CPI / firstRecord.TUR_CPI)) : null;
+    const initialReal = firstRecord ? firstRecord.Reel_wage : null;
 
     return filteredData.map(d => {
       const nominal = d['Min Wage'];
-      const cpi = d.TUR_CPI;
-      const realWage = nominal && cpi && baseTUR_CPI ? (nominal * (baseTUR_CPI / cpi)) : null;
+      const realWage = d.Reel_wage;
       const usd = d.USDTL && d.USDTL > 0 ? (nominal / d.USDTL) : null;
 
       if (chartDisplayMode === 'percentage') {
@@ -333,7 +330,7 @@ export default function App() {
           name: d.Date,
           'Asgari Ücret (₺)': nominal,
           'Asgari Ücret ($)': usd ? parseFloat(usd.toFixed(2)) : null,
-          'Reel Asgari Ücret (Ocak 2015 ₺)': realWage ? parseFloat(realWage.toFixed(2)) : null
+          'Reel Asgari Ücret (Mayıs 1977 ₺)': realWage ? parseFloat(realWage.toFixed(2)) : null
         };
       }
     }).filter(d => {
@@ -504,7 +501,7 @@ export default function App() {
                       <Line 
                         yAxisId="left" 
                         type="monotone" 
-                        dataKey={chartDisplayMode === 'percentage' ? "Reel Asgari Ücret Değişimi %" : "Reel Asgari Ücret (Ocak 2015 ₺)"} 
+                        dataKey={chartDisplayMode === 'percentage' ? "Reel Asgari Ücret Değişimi %" : "Reel Asgari Ücret (Mayıs 1977 ₺)"} 
                         stroke="#f59e0b" 
                         strokeWidth={3} 
                         dot={false} 
